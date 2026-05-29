@@ -1,8 +1,8 @@
 """
 시장 특이사항 브리핑 스크립트
-- 장중(KST 09:00~15:40, 평일): 코스피 실시간 지수 단독 발송
-- KST 12시 이전: 오전 미국장 & 크립토 특이사항 알림
-- KST 12시 이후: 오후 국장 특이사항 알림
+- 장중(KST 평일 09:00~15:40): 국내 실시간 시황 테스트 발송
+- KST 12시 이전 또는 22시 정각: 미국장 & 크립토 특이사항 알림
+- 그 외 시간: 오후 국장 특이사항 알림
 실행: python monitor.py
 의존성: pip install yfinance pandas requests pytz
 """
@@ -30,17 +30,28 @@ GOLD_ALERT_PRICE = 4400.0  # 금 가격 하회 경보 ($)
 VIX_DANGER       = 30.0    # VIX 위험 기준
 RSI_OVERSOLD     = 30.0    # RSI 과매도 기준
 RSI_PERIOD       = 14
-SMA_PERIODS      = [20, 120]  # 감시할 이평선 기간 목록
+SMA_PERIODS      = [20, 120]
 
-# 오전 브리핑 + 이평선/RSI 공통 대상 종목
+# 오전/장전 브리핑 감시 종목 (RSI + 이평선 공통)
 WATCH_TICKERS = [
     "SCHD", "PDBC", "BULZ", "FNGU", "HOOD",
     "CPNG", "NTRA", "EFA",  "EEM",  "QQQ", "RBLX",
 ]
 
-# 코스피 장중 시간 (KST)
-MARKET_OPEN  = (9,  0)   # 09:00
-MARKET_CLOSE = (15, 40)  # 15:40
+# 장중 실시간 시황 대상 자산
+# (name, ticker, currency_type)
+#   currency_type: "index" → 소수점 2자리 / "krw" → 정수 + 원
+INTRADAY_ASSETS = [
+    ("코스피",     "^KS11",     "index"),
+    ("코스닥",     "^KQ11",     "index"),
+    ("삼성전자",   "005930.KS", "krw"),
+    ("SK하이닉스", "000660.KS", "krw"),
+    ("현대차",     "005380.KS", "krw"),
+]
+
+# 코스피 장중 시간 (KST, 튜플 비교용)
+MARKET_OPEN  = (9,  0)
+MARKET_CLOSE = (15, 40)
 
 KST = pytz.timezone("Asia/Seoul")
 
@@ -86,29 +97,19 @@ def calc_rsi_wilder(series: pd.Series, period: int = RSI_PERIOD) -> float:
 
 
 def scan_sma_crossovers(series: pd.Series, ticker: str) -> list:
-    """
-    20일·120일 SMA 돌파를 한 번에 스캔하여 알림 문자열 리스트를 반환한다.
-    데이터가 부족한 기간은 조용히 건너뛴다.
-    """
+    """20일·120일 SMA 돌파를 스캔하여 알림 문자열 리스트를 반환한다."""
     curr_price = round(float(series.iloc[-1]), 2)
     alerts     = []
-
     for period in SMA_PERIODS:
-        # 이평선 계산에 필요한 최소 데이터(period + 전일 비교용 1행) 확인
         if len(series) < period + 1:
             continue
-
         sma = series.rolling(period).mean()
-
-        # NaN 방어: 전일·당일 이평선 값이 모두 유효해야 함
         if pd.isna(sma.iloc[-2]) or pd.isna(sma.iloc[-1]):
             continue
-
         prev_close = float(series.iloc[-2])
         curr_close = float(series.iloc[-1])
         prev_sma   = float(sma.iloc[-2])
         curr_sma   = float(sma.iloc[-1])
-
         if prev_close <= prev_sma and curr_close > curr_sma:
             alerts.append(
                 f"📈 [이평선 상향돌파] {ticker} 이(가) {period}일선을 뚫고 올라갔습니다!"
@@ -119,42 +120,63 @@ def scan_sma_crossovers(series: pd.Series, ticker: str) -> list:
                 f"📉 [이평선 하향이탈] {ticker} 이(가) {period}일선 아래로 무너졌습니다."
                 f" (가격: ${curr_price:.2f})"
             )
-
     return alerts
 
 
 # ══════════════════════════════════════════════
-#  장중 코스피 실시간 알림
+#  장중 실시간 시황 알림
 # ══════════════════════════════════════════════
 
 def is_kospi_market_hours(now_kst: datetime) -> bool:
     """코스피 장중(평일 KST 09:00~15:40)인지 확인한다."""
-    if now_kst.weekday() >= 5:   # 토요일(5), 일요일(6) 제외
+    if now_kst.weekday() >= 5:   # 토(5), 일(6) 제외
         return False
     t = (now_kst.hour, now_kst.minute)
     return MARKET_OPEN <= t <= MARKET_CLOSE
 
 
-def build_kospi_intraday_message() -> Optional[str]:
-    """장중 코스피 현재 지수를 단 한 줄 메시지로 반환한다."""
-    try:
-        series  = fetch_close("^KS11", period="2d")
-        current = round(float(series.iloc[-1]), 2)
-        return f"⏱️ [테스트] 현재 코스피 지수: {current:,.2f}"
-    except Exception as e:
-        print(f"[WARN] 코스피 장중 조회 실패: {e}")
-        return None
+def fmt_price(value: float, currency_type: str) -> str:
+    """currency_type에 따라 가격 문자열을 포맷한다."""
+    if currency_type == "krw":
+        return f"{int(round(value)):,}원"
+    return f"{value:,.2f}"   # index: 소수점 2자리, 단위 없음
+
+
+def build_intraday_message() -> Optional[str]:
+    """장중 국내 실시간 시황을 여러 자산 포함 메시지로 반환한다."""
+    lines       = ["⏱️ [장중 실시간 시황 테스트]"]
+    any_success = False
+
+    for name, ticker, currency_type in INTRADAY_ASSETS:
+        try:
+            series  = fetch_close(ticker, period="2d")
+            current = float(series.iloc[-1])
+            ret     = daily_return(series)
+            sign    = "+" if ret >= 0 else ""
+            price_str = fmt_price(current, currency_type)
+            lines.append(f"- {name}: {price_str} ({sign}{ret:.2f}%)")
+            any_success = True
+        except Exception as e:
+            print(f"[WARN] {name}({ticker}) 장중 조회 실패: {e}")
+            lines.append(f"- {name}: 조회 실패")
+
+    return "\n".join(lines) if any_success else None
 
 
 # ══════════════════════════════════════════════
-#  오전 브리핑: 미국장 & 크립토 특이사항
+#  오전 / 장전 브리핑: 미국장 & 크립토 특이사항
 # ══════════════════════════════════════════════
 
-def build_morning_briefing() -> str:
+def build_morning_briefing(title: Optional[str] = None) -> str:
+    """
+    title 미지정 → ☀️ [오전 미국장 & 크립토 특이사항 알림]
+    title 지정   → 전달된 제목 문자열 사용 (예: 🌌 [오후 10시 장전 브리핑])
+    """
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+    header  = title if title else "☀️ [오전 미국장 & 크립토 특이사항 알림]"
     alerts  = []
 
-    # ── 나스닥: 일간 -3% 이하일 때만
+    # ── 나스닥: -3% 이하일 때만
     try:
         ret = daily_return(fetch_close("^IXIC"))
         if ret <= NASDAQ_CRASH_PCT:
@@ -162,7 +184,7 @@ def build_morning_briefing() -> str:
     except Exception as e:
         print(f"[WARN] 나스닥: {e}")
 
-    # ── 비트코인: 일간 -5% 이하일 때만
+    # ── 비트코인: -5% 이하일 때만
     try:
         ret = daily_return(fetch_close("BTC-USD"))
         if ret <= BTC_CRASH_PCT:
@@ -186,9 +208,9 @@ def build_morning_briefing() -> str:
     except Exception as e:
         print(f"[WARN] VIX: {e}")
 
-    # ── 종목별 RSI 과매도(30 이하) + SMA 돌파: 데이터 1회 공유
+    # ── 종목별 RSI 과매도(30 이하) + SMA 돌파
     for ticker in WATCH_TICKERS:
-        # RSI용 데이터 (60일)
+        # RSI (60일 데이터)
         try:
             series_60d = fetch_close(ticker, period="60d")
             rsi        = calc_rsi_wilder(series_60d)
@@ -197,7 +219,7 @@ def build_morning_briefing() -> str:
         except Exception as e:
             print(f"[WARN] {ticker} RSI: {e}")
 
-        # SMA 돌파용 데이터 (1년 — 120일선 계산에 충분한 기간)
+        # SMA 돌파 (1년 데이터 — 120일선 계산에 충분)
         try:
             series_1y  = fetch_close(ticker, period="1y")
             sma_alerts = scan_sma_crossovers(series_1y, ticker)
@@ -206,7 +228,7 @@ def build_morning_briefing() -> str:
             print(f"[WARN] {ticker} SMA: {e}")
 
     body = "\n".join(alerts) if alerts else "- 특이사항 없음"
-    return f"☀️ [오전 미국장 & 크립토 특이사항 알림]\n기준 시각: {now_str} KST\n\n{body}"
+    return f"{header}\n기준 시각: {now_str} KST\n\n{body}"
 
 
 # ══════════════════════════════════════════════
@@ -237,7 +259,6 @@ def build_afternoon_briefing() -> str:
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     alerts  = []
 
-    # ── 코스피: 천 단위 경계 변화 있을 때만
     try:
         kospi_s = fetch_close("^KS11")
         alert   = check_kospi_level_cross(kospi_s)
@@ -276,18 +297,26 @@ if __name__ == "__main__":
     now_kst = datetime.now(KST)
     print(f"현재 KST: {now_kst.strftime('%Y-%m-%d %H:%M')}")
 
-    # ① 장중 코스피 테스트 알림 — 특이사항 브리핑과 완전히 독립 실행
+    # ① 장중 실시간 시황 — 특이사항 브리핑과 완전히 독립 실행
     if is_kospi_market_hours(now_kst):
-        print("장중 시간 감지 → 코스피 실시간 알림 발송 중...")
-        intraday_msg = build_kospi_intraday_message()
+        print("장중 시간 감지 → 국내 실시간 시황 발송 중...")
+        intraday_msg = build_intraday_message()
         if intraday_msg:
             print(intraday_msg)
             send_telegram_message(intraday_msg)
 
-    # ② 오전/오후 특이사항 브리핑
-    if now_kst.hour < 12:
+    # ② 시간별 브리핑 분기
+    #    - 12시 이전      → 오전 미국장 브리핑 (☀️)
+    #    - 22시 정각      → 장전 미국장 브리핑 (🌌, 제목만 다름)
+    #    - 그 외 시간     → 오후 국장 브리핑 (🌙)
+    hour = now_kst.hour
+
+    if hour < 12:
         print("오전 브리핑 실행 중...")
         message = build_morning_briefing()
+    elif hour == 22:
+        print("장전(22시) 브리핑 실행 중...")
+        message = build_morning_briefing(title="🌌 [오후 10시 장전 브리핑]")
     else:
         print("오후 브리핑 실행 중...")
         message = build_afternoon_briefing()
