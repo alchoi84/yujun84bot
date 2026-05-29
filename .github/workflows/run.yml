@@ -2,15 +2,16 @@ name: 종합 투자 모니터링 시스템
 
 on:
   schedule:
-    - cron: '0 22 * * *'    # ① 한국 시간 아침 7시 정각 (주식/크립토 브리핑)
-    - cron: '0 7 * * *'     # ② 한국 시간 오후 4시 정각 (국장 마감 브리핑)
-    - cron: '0 13 * * *'    # ③ 한국 시간 오후 10시 정각 (미국장 장전 브리핑)
-    - cron: '*/10 0-7 * * 1-5' # ④ 평일 오전 9시~오후 4시 사이 10분마다 기상 (국장 장중 테스트용)
+    - cron: '0 22 * * *'    # ① 한국 시간 아침 7시 정각
+    - cron: '0 7 * * *'     # ② 한국 시간 오후 4시 정각
+    - cron: '0 13 * * *'    # ③ 한국 시간 오후 10시 정각
   workflow_dispatch:        # 수동 즉시 실행용 버튼
 
 jobs:
   run-all-tasks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # ★ 중요: 텔레그램 명령어로 와치리스트를 수정하기 위해 필수인 권한
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v4
@@ -24,5 +25,5 @@ jobs:
         run: |
           pip install yfinance pandas requests pytz
 
-      - name: ⏰ [주식/RSI/이평선/장중시황] 모니터링 실행
+      - name: ⏰ 모니터링 및 텔레그램 명령어 처리 실행
         run: python monitor.py
