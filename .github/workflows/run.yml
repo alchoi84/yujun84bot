@@ -4,16 +4,13 @@ on:
   schedule:
     - cron: '0 22 * * *'    # ① 한국 시간 아침 7시 정각 (주식/크립토 브리핑)
     - cron: '0 7 * * *'     # ② 한국 시간 오후 4시 정각 (국장 마감 브리핑)
-    - cron: '0 13 * * *'    # ③ [추가] 한국 시간 오후 10시 정각 (미국장 장전 브리핑)
-    - cron: '*/15 * * * *'  # ④ 15분마다 상시 기상 (트위터 감시 전용)
-    - cron: '*/10 0-7 * * 1-5' # ⑤ 평일 오전 9시~오후 4시 사이 10분마다 기상 (국장 장중 테스트용)
+    - cron: '0 13 * * *'    # ③ 한국 시간 오후 10시 정각 (미국장 장전 브리핑)
+    - cron: '*/10 0-7 * * 1-5' # ④ 평일 오전 9시~오후 4시 사이 10분마다 기상 (국장 장중 테스트용)
   workflow_dispatch:        # 수동 즉시 실행용 버튼
 
 jobs:
   run-all-tasks:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write       
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v4
@@ -29,13 +26,3 @@ jobs:
 
       - name: ⏰ [주식/RSI/이평선/장중시황] 모니터링 실행
         run: python monitor.py
-
-      - name: ⏰ [트위터] 15분마다 @0xGwoni 감시 실행
-        run: python twitter.py
-
-      - name: 읽은 트윗 ID 자동 업데이트 (기억력 유지)
-        run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-          git add last_tweet.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last tweet ID" && git push)
