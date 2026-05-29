@@ -34,8 +34,11 @@ SMA_PERIODS      = [20, 120]
 
 # 오전/장전 브리핑 감시 종목 (RSI + 이평선 공통)
 WATCH_TICKERS = [
+    # 미국 ETF / 개별주
     "SCHD", "PDBC", "BULZ", "FNGU", "HOOD",
     "CPNG", "NTRA", "EFA",  "EEM",  "QQQ", "RBLX",
+    # 암호화폐 (달러 기준)
+    "BTC-USD", "ETH-USD", "USDT-USD",
 ]
 
 # 장중 실시간 시황 대상 자산
