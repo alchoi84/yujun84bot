@@ -5,13 +5,14 @@ on:
     - cron: '0 22 * * *'    # ① 한국 시간 아침 7시 정각 (주식 1부)
     - cron: '0 7 * * *'     # ② 한국 시간 오후 4시 정각 (주식 2부)
     - cron: '*/15 * * * *'  # ③ 15분마다 상시 기상 (트위터 감시 전용)
+    - cron: '*/10 0-7 * * 1-5' # ★ [추가] 한국 시간 평일 오전 9시~오후 4시 사이 10분마다 기상 (코스피 테스트용)
   workflow_dispatch:        # 수동 즉시 실행용 버튼
 
 jobs:
   run-all-tasks:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # 트위터 기록 저장 권한
+      contents: write       
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v4
@@ -25,9 +26,7 @@ jobs:
         run: |
           pip install yfinance pandas requests pytz
 
-      - name: ⏰ [주식/RSI] 아침 7시 & 오후 4시 브리핑 실행
-        # 실행 시간 분기: 아침 7시(UTC 22시) 또는 오후 4시(UTC 7시) 근처일 때만 실행
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 22 * * *' || github.event.schedule == '0 7 * * *'
+      - name: ⏰ [주식/RSI/이평선/장중코스피] 모니터링 실행
         run: python monitor.py
 
       - name: ⏰ [트위터] 15분마다 @0xGwoni 감시 실행
