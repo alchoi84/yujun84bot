@@ -1,14 +1,17 @@
-name: 주식 모니터링 자동화
+name: 종합 투자 모니터링 시스템
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # ① 한국 시간 매일 아침 7시 정각 실행 (UTC 전날 22:00)
-    - cron: '0 7 * * *'   # ② 한국 시간 매일 오후 4시 정각 실행 (UTC 당일 07:00)
-  workflow_dispatch:     # 수동으로 즉시 테스트할 수 있는 버튼
+    - cron: '0 22 * * *'    # ① 한국 시간 아침 7시 정각 (주식 1부)
+    - cron: '0 7 * * *'     # ② 한국 시간 오후 4시 정각 (주식 2부)
+    - cron: '*/15 * * * *'  # ③ 15분마다 상시 기상 (트위터 감시 전용)
+  workflow_dispatch:        # 수동 즉시 실행용 버튼
 
 jobs:
-  run-monitor:
+  run-all-tasks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # 트위터 기록 저장 권한
     steps:
       - name: 코드 가져오기
         uses: actions/checkout@v4
@@ -18,9 +21,21 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 라이브러리 및 타임존 설치
+      - name: 필수 라이브러리 설치
         run: |
           pip install yfinance pandas requests pytz
 
-      - name: 프로그램 실행
+      - name: ⏰ [주식/RSI] 아침 7시 & 오후 4시 브리핑 실행
+        # 실행 시간 분기: 아침 7시(UTC 22시) 또는 오후 4시(UTC 7시) 근처일 때만 실행
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 22 * * *' || github.event.schedule == '0 7 * * *'
         run: python monitor.py
+
+      - name: ⏰ [트위터] 15분마다 @0xGwoni 감시 실행
+        run: python twitter.py
+
+      - name: 읽은 트윗 ID 자동 업데이트 (기억력 유지)
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add last_tweet.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last tweet ID" && git push)
