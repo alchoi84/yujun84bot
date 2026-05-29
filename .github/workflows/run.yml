@@ -1,0 +1,25 @@
+name: 주식 모니터링 자동화
+
+on:
+  schedule:
+    - cron: '0 7 * * *'  # 한국 시간 매일 오후 4시 정각 실행 (UTC 07:00)
+  workflow_dispatch:     # 수동으로 즉시 실행할 수 있는 버튼 활성화
+
+jobs:
+  run-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v4
+
+      - name: 파이썬 세팅
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 라이브러리 설치
+        run: |
+          pip install yfinance pandas requests
+
+      - name: 프로그램 실행
+        run: python monitor.py
